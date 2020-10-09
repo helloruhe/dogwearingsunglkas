@@ -9,6 +9,8 @@ using Tweetinvi.Parameters;
 using System.Net;
 using System.Drawing.Imaging;
 using System.Drawing;
+using System.Linq;
+using System.Diagnostics;
 
 namespace dws
 {
@@ -18,9 +20,9 @@ namespace dws
         private static string _replies = "replies.json";
         private static List<long> _alreadyReplied = new List<long>();
         private static List<string> replies = new List<string>();
-        private TwitterClient twitterClient;
+        private TwitterClient twitterClient = new TwitterClient(null);
 
-        public TwitterService(string consumerKey, string consumerSecret, string accessToken, string accessTokenSecret)
+        public TwitterService()
         {
             if (File.Exists(_alreadyRepliedFile))
                 _alreadyReplied = JsonConvert.DeserializeObject<List<long>>(File.ReadAllText(_alreadyRepliedFile));
@@ -28,7 +30,6 @@ namespace dws
             if (File.Exists(_replies))
                 replies = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(_replies));
 
-            var userClient = new TwitterClient(consumerKey, consumerSecret, accessToken, accessTokenSecret);
         }
 
         public void AddReply(string reply)
@@ -39,85 +40,126 @@ namespace dws
 
         public async Task PostImage(string pic)
         {
-            string format = ".png";
-            if (pic.EndsWith(".jpeg") || pic.EndsWith(".jpg"))
-            {
-                format = ".jpg";
-                SaveImage(ImageFormat.Jpeg, pic);
-            }
-            else
-            {
-                SaveImage(ImageFormat.Png, pic);
-            }
-
-            var tweetinviLogoBinary = File.ReadAllBytes("image" + format);
-            var uploadedImage = await twitterClient.Upload.UploadTweetImageAsync(tweetinviLogoBinary);
+            var uploadedImage = await twitterClient.Upload.UploadTweetImageAsync(GetImage(pic));
             var t = await twitterClient.Tweets.PublishTweetAsync(new PublishTweetParameters("dog wearing sunglasses")
             {
                 Medias = { uploadedImage }
             });
 
         }
-
-        private void SaveImage(ImageFormat format, string imageUrl)
+        private byte[] GetImage(string iconPath)
         {
-            WebClient client = new WebClient();
-            Stream stream = client.OpenRead(imageUrl);
-            Bitmap bitmap; bitmap = new Bitmap(stream);
-
-            if (bitmap != null)
+            using (WebClient client = new WebClient())
             {
-                bitmap.Save("image", format);
+                byte[] pic = client.DownloadData(iconPath);
+                string checkPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) +@"\1.png";
+                File.WriteAllBytes(checkPath, pic);
+                return pic;
             }
-
-            stream.Flush();
-            stream.Close();
-            client.Dispose();
         }
+
 
         public async Task AuthClient()
         {
-            var user = await twitterClient.Users.GetAuthenticatedUserAsync();
+            var appClient = new TwitterClient(Environment.GetEnvironmentVariable("consumerKey"), Environment.GetEnvironmentVariable("consumerSecret"));
+
+            // Start the authentication process
+            var authenticationRequest = await appClient.Auth.RequestAuthenticationUrlAsync();
+
+            // Go to the URL so that Twitter authenticates the user and gives him a PIN code.
+            Process.Start(new ProcessStartInfo(authenticationRequest.AuthorizationURL)
+            {
+                UseShellExecute = true
+            });
+
+            // Ask the user to enter the pin code given by Twitter
+            Console.WriteLine("Please enter the code and press enter.");
+            var pinCode = Console.ReadLine();
+
+            // With this pin code it is now possible to get the credentials back from Twitter
+            var userCredentials = await appClient.Auth.RequestCredentialsFromVerifierCodeAsync(pinCode, authenticationRequest);
+
+            // You can now save those credentials or use them as followed
+            var userClient = new TwitterClient(userCredentials);
+            var user = await userClient.Users.GetAuthenticatedUserAsync();
+            twitterClient = userClient;
+            Console.WriteLine("Congratulation you have authenticated the user: " + user);
         }
 
         public async Task checkMentions()
         {
-            var mentions = await twitterClient.Timelines.GetMentionsTimelineAsync();
-            var talky = GetRandomReply();
-
-            if (File.Exists(_alreadyRepliedFile))
+            try
             {
-                foreach (ITweet tweet in mentions)
+                var mentions = await twitterClient.Timelines.GetMentionsTimelineAsync();
+
+                if (File.Exists(_alreadyRepliedFile))
                 {
-                    if (!_alreadyReplied.Contains(tweet.Id))
+                    foreach (ITweet tweet in mentions)
                     {
-                        talky.InReplyToTweet = tweet;
+                        var talky = GetRandomReply();
+
+                        if (!_alreadyReplied.Contains(tweet.Id))
+                        {
+                            string ats = $"@{tweet.CreatedBy.ScreenName} ";
+                            foreach (var user in tweet.UserMentions)
+                            {
+                               if (user.ScreenName != "Dogwearingsun")
+                                ats += $"@{user.ScreenName} ";
+                            }
+                                var reply = await twitterClient.Tweets.PublishTweetAsync(new PublishTweetParameters(ats + $" {talky}")
+                            {
+                                InReplyToTweet = tweet
+                            });
+                            await twitterClient.Tweets.FavoriteTweetAsync(tweet);
+                            _alreadyReplied.Add(tweet.Id);
+                        }
+                    }
+                }
+
+                else
+                {
+                    foreach (ITweet tweet in mentions)
+                    {
+                        var talky = GetRandomReply();
+
+                        string ats = $"@{tweet.CreatedBy.ScreenName} ";
+                        foreach (var user in tweet.UserMentions)
+                        {
+
+                            if (user.ScreenName != "Dogwearingsun")
+                                ats += $"@{user.ScreenName} ";
+                        }
+                        var reply = await twitterClient.Tweets.PublishTweetAsync(new PublishTweetParameters(ats + $" {talky}")
+                        {
+                            InReplyToTweet = tweet
+                        });
                         await twitterClient.Tweets.FavoriteTweetAsync(tweet);
-                        var reply = await twitterClient.Tweets.PublishTweetAsync(talky);
                         _alreadyReplied.Add(tweet.Id);
                     }
                 }
-            }
 
-            else
-            {
-                foreach (ITweet tweet in mentions)
-                {
-                    talky.InReplyToTweet = tweet;
-                    await twitterClient.Tweets.FavoriteTweetAsync(tweet);
-                    var reply = await twitterClient.Tweets.PublishTweetAsync(talky);
-                    _alreadyReplied.Add(tweet.Id);
-                }
+                File.WriteAllText(_alreadyRepliedFile, JsonConvert.SerializeObject(_alreadyReplied));
             }
-
-            File.WriteAllText(_alreadyRepliedFile, JsonConvert.SerializeObject(_alreadyReplied));
+            catch { }
         }
-
-        private PublishTweetParameters GetRandomReply()
+        public async Task<string> GetLatestTweet()
         {
-            Random rnd = new Random();
-            int r = rnd.Next(replies.Count);
-            return new PublishTweetParameters(replies[r]);
+            var userTimelineTweets = await twitterClient.Timelines.GetUserTimelineAsync("dogwearingsungl");
+            return userTimelineTweets.First(x => x.UserMentions == null).Url;
+        }
+        public string GetRandomReply()
+        {
+            try
+            {
+                Random rnd = new Random();
+                int r = rnd.Next(replies.Count);
+                return replies[r].Remove("\"/");
+            }
+            catch
+            {
+                return "music";
+            }
+            
         }
     }
 }

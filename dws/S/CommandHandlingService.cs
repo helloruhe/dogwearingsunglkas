@@ -1,10 +1,12 @@
-﻿using System;
-using System.Reflection;
-using System.Threading.Tasks;
-using Microsoft.Extensions.DependencyInjection;
-using Discord;
-using Discord.Commands;
+﻿using Discord.Commands;
 using Discord.WebSocket;
+using System.Threading.Tasks;
+using System;
+using Discord;
+using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
+using Discord.Addons.Interactive;
+using System.Net.Http;
 
 namespace dws
 {
@@ -31,6 +33,14 @@ namespace dws
         {
             // Register modules that are public and inherit ModuleBase<T>.
             await _commands.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
+            foreach (var ok in _commands.Modules)
+            {
+                Console.WriteLine(ok.Name);
+                foreach (var poop in ok.Commands)
+                {
+                    Console.WriteLine(poop.Name);
+                }
+            }
         }
 
         public async Task MessageReceivedAsync(SocketMessage rawMessage)
@@ -44,15 +54,18 @@ namespace dws
             // Perform prefix check. You may want to replace this with
             // (!message.HasCharPrefix('!', ref argPos))
             // for a more traditional command format like !help.
-            if (!message.HasMentionPrefix(_discord.CurrentUser, ref argPos)) return;
+            if (message.HasMentionPrefix(_discord.CurrentUser, ref argPos) || (message.HasCharPrefix('-', ref argPos)))
+            {
 
-            var context = new SocketCommandContext(_discord, message);
-            // Perform the execution of the command. In this method,
-            // the command service will perform precondition and parsing check
-            // then execute the command if one is matched.
-            await _commands.ExecuteAsync(context, argPos, _services);
-            // Note that normally a result will be returned by this format, but here
-            // we will handle the result in CommandExecutedAsync,
+                var context = new SocketCommandContext(_discord, message);
+                // Perform the execution of the command. In this method,
+                // the command service will perform precondition and parsing check
+                // then execute the command if one is matched.
+                await _commands.ExecuteAsync(context, argPos, _services);
+                // Note that normally a result will be returned by this format, but here
+                // we will handle the result in CommandExecutedAsync,
+            }
+            else return;
         }
 
         public async Task CommandExecutedAsync(Optional<CommandInfo> command, ICommandContext context, IResult result)
