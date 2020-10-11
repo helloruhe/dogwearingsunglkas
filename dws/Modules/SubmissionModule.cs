@@ -9,65 +9,57 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
+using dws.S;
 
 namespace dws.Modules
 {
     public class SubmissionModule : InteractiveBase<SocketCommandContext>
     {
         public TwitterService TwitterService { get; set; }
+        public ImageService ImageService { get; set; }
 
         public SubmissionModule()
         {
-            if (!File.Exists(authorizedAgentsFile))
-            {
-                File.WriteAllText(authorizedAgentsFile, JsonConvert.SerializeObject(authorizedAgents));
-            }
-            else
-            {
-                authorizedAgents = JsonConvert.DeserializeObject<List<ulong>>(File.ReadAllText(authorizedAgentsFile));
-            }
+
         }
 
-        private List<ulong> authorizedAgents = new List<ulong>()
-        {
-            404793286130270208 //hi dione
-        };
-
-        private readonly string authorizedAgentsFile = "admins.json";
-        private static string _queue = "images.json";
         [Command("r", RunMode = RunMode.Async)]
         public async Task JustReplyAsync()
         {
             await ReplyAsync(TwitterService.GetRandomReply());
         }
 
-        [Command("t")]
-        public async Task test()
-        {
-            await ReplyAsync("hi");
-        }
         [Command("addreply", RunMode = RunMode.Async)]
         [Alias("ar")]
+        [RequireBotMod]
         public async Task AddReplyAsync([Remainder] string reply)
-        {
-            if (authorizedAgents.Contains(Context.User.Id))
-            {
+        { 
                 TwitterService.AddReply(reply);
                 await Context.Channel.SendMessageAsync($"Reply has been added to list! 🔥");
-            }
-            else
-            {
-                await Context.Channel.SendMessageAsync($"U cant do that");
-            }
         }
+
+        [Command("addreply", RunMode = RunMode.Async)]
+        [Alias("ar")]
+        [RequireBotMod]
+        public async Task AddReplyAsync()
+        {
+            if (Context.Message.Attachments == null)
+            {
+                await Context.Channel.SendMessageAsync($"wheres the image fucktard");
+                return;
+            }
+            TwitterService.AddReply(Context.Message.GetFirstAttachment());
+            await Context.Channel.SendMessageAsync($"Reply has been added to list! 🔥");
+        }
+
         [Command("authusers")]
         public async Task AuthorizedUsers()
         {
-            List<string> q = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(authorizedAgentsFile));
+            List<string> q = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText("admins.json"));
             string list = "";
             foreach (var b in q)
             {
-                list += b + "\n";
+                list += "<@"+b +">"+ "\n";
             }
             if (!(list.Length > 1999))
             {
@@ -99,57 +91,71 @@ namespace dws.Modules
 
         [Command("addauth", RunMode = RunMode.Async)]
         [Alias("aa")]
+        [RequireBotMod]
         public async Task AddUser(IUser user)
         {
-            if (authorizedAgents.Contains(Context.User.Id))
-            {
-                authorizedAgents.Add(user.Id);
-                File.WriteAllText(authorizedAgentsFile, JsonConvert.SerializeObject(authorizedAgents));
                 await Context.Channel.SendMessageAsync($"{user.Mention} has been added to list 🔥");
-            }
-            else
-            {
-                await Context.Channel.SendMessageAsync($"U cant do that");
-            }
         }
+
         [Command("cm"), Alias("checkmentions")]
         public async Task CheckMentions()
         {
-            if (authorizedAgents.Contains(Context.User.Id))
-            {
                 await TwitterService.checkMentions();
                 await Context.Channel.SendMessageAsync($" 🔥");
-            }
-            else
-            {
-                await Context.Channel.SendMessageAsync($"U cant do that");
-            }
         }
+
         [Command("submitphoto", RunMode = RunMode.Async)]
+        [RequireBotMod]
         [Alias("sp", "addpic", "ap")]
         public async Task AddPicAsync()
         {
-            if (authorizedAgents.Contains(Context.User.Id))
+            if (Context.Message.Attachments == null)
             {
-                int cnt = 0;
+                await Context.Channel.SendMessageAsync($"wheres the image fucktard");
+                return;
+            }
+            Classes.Image img = new Classes.Image()
+            {
+                ImageUrl = Context.Message.GetFirstAttachment()
+            };
+            await ReplyAsync("Img source? (\"unknown\" if unknown");
+            var msg = await NextMessageAsync(true, true, TimeSpan.FromSeconds(30));
+            img.Source = msg.Content;
+            if (img.ImageUrl.EndsWith(".mp4"))
+            {
+                img.ImageType = Classes.ImageType.Video;
+            }
+            if (img.Source.EndsWith(".gif"))
+            {
+                img.ImageType = Classes.ImageType.GIF;
+            }
+            ImageService.AddImage(img);
+            await Context.Channel.SendMessageAsync($"Item has been added to the queue! 🔥");
+        }
 
-                var q = GetQueue();
-                foreach (var ok in Context.Message.Attachments)
-                {
-                   if (ok.Url.EndsWith("png") || ok.Url.EndsWith("jpg") || ok.Url.EndsWith("jpeg"))
-                   {
-                       q.Add(ok.Url);
-                   }
-                   else { }
-                   cnt += 1;
-                }
-                File.WriteAllText(_queue, JsonConvert.SerializeObject(q));
-                await Context.Channel.SendMessageAsync($"{cnt} image(s) have been added to the queue! 🔥");
-            }
-            else
+        [Command("submitphoto", RunMode = RunMode.Async)]
+        [RequireBotMod]
+        [Alias("sp", "addpic", "ap")]
+        public async Task AddPicAsync(string url)
+        {
+            Classes.Image img = new Classes.Image()
             {
-                await Context.Channel.SendMessageAsync($"U cant do that");
+                ImageUrl = url
+            };
+            await ReplyAsync("Img source? (\"unknown\" if unknown");
+            var msg = await NextMessageAsync(true, true, TimeSpan.FromSeconds(30));
+            img.Source = msg.Content;
+            if (img.Source.EndsWith(".mp4"))
+            {
+                img.ImageType = Classes.ImageType.Video;
             }
+            if (img.Source.EndsWith(".gif"))
+            {
+                img.ImageType = Classes.ImageType.GIF;
+            }
+        
+            ImageService.AddImage(img);
+            await Context.Channel.SendMessageAsync($"Item has been added to the queue! 🔥");
         }
 
         [Command("status", RunMode = RunMode.Async)]
@@ -180,40 +186,40 @@ namespace dws.Modules
         
         [Command("forcepost", RunMode = RunMode.Async)]
         [Alias("fp")]
+        [RequireBotMod]
         public async Task ForcePostAsync()
         {
-            if (authorizedAgents.Contains(Context.User.Id))
-            {
-                var q = GetQueue();
-                var o = q.First();
-                q.Remove(q.First());
-                File.WriteAllText("images.json", JsonConvert.SerializeObject(q));
-                await TwitterService.PostImage(o);
-                File.WriteAllText("multi.txt", "0");
-                await Context.Channel.SendMessageAsync("ok");
-            }
-            else
-            {
-                await Context.Channel.SendMessageAsync($"U cant do that");
-            }
+            await TwitterService.PostImage();
+            File.WriteAllText("multi.txt", "0");
+            await Context.Channel.SendMessageAsync("ok");
         }
 
         [Command("queue", RunMode = RunMode.Async)]
         [Alias("q")]
         public async Task CheckQueueAsync()
         {
-            List<string> q = GetQueue();
+            List<Classes.Image> q = ImageService.GetQueue();
 
             List<EmbedBuilder> embeds = new List<EmbedBuilder>();
             int p = 1;
             foreach (var item in q)
             {
-                embeds.Add(new EmbedBuilder()
+                if (item.ImageType is Classes.ImageType.Image)
                 {
-                    Title = "dog",
-                    ImageUrl = item,
-                    Description = $"Image {p}"
-                });
+                    embeds.Add(new EmbedBuilder()
+                    {
+                        Title = "dog",
+                        ImageUrl = item.ImageUrl
+                    });
+                }
+                else
+                {
+                    embeds.Add(new EmbedBuilder()
+                    {
+                        Title = "dog",
+                        Description = item.ImageUrl
+                    });
+                }
                 p += 1;
             }
 
@@ -229,46 +235,56 @@ namespace dws.Modules
             {
                 list += b + "\n";
             }
-            if (!(list.Length > 1999))
+            var f = new List<EmbedBuilder>();
+            var nonImage = new List<string>();
+            foreach (var ok in q)
             {
-                await Ext.EmbedAsync(Context.Channel, new EmbedBuilder()
+                if (!ok.EndsWith(".png") || !ok.EndsWith(".gif") 
+                    || !ok.EndsWith(".jpg") || !ok.EndsWith(".jpeg"))
                 {
-                    Title = "Responses",
-                    Description = list
-                }.Build());
+                    nonImage.Add(ok);
+                }
             }
-            else
+            foreach (var pee in nonImage)
             {
-                var f = new List<EmbedBuilder>();
-                foreach (var b in q.ChunkBy(15))
-                {
+                q.Remove(pee);
+            }
+            foreach (var b in nonImage.ChunkBy(15))
+            {
                     list = "";
                     foreach (var e in b)
                     {
                         list += e + "\n";
-                        f.Add(new EmbedBuilder()
-                        {
-                            Title = "Responses",
-                            Description = list
-                        });
                     }
-                }
-                await PagedReplyAsync(f, false);
+                    f.Add(new EmbedBuilder()
+                    {
+                        Title = "Responses",
+                        Description = list
+                    });
             }
+            foreach (var b in q)
+            {
+                f.Add(new EmbedBuilder()
+                {
+                    Title = "Responses",
+                    ImageUrl = b
+                });
+            }
+            await PagedReplyAsync(f, false);
+            
         }
 
         [Command("ri", RunMode = RunMode.Async), Alias("removeimage", "rq")]
+        [RequireBotMod]
         public async Task removeFromQ(int index)
         {
-            var v = GetQueue();
-            var img = v[index - 1];
-            await ReplyAsync(img);
+            var img = ImageService.GetImage(index-1);
+            await ReplyAsync(img.ImageUrl);
             await ReplyAsync("Remove this? (Y/N)");
             var msg = await NextMessageAsync(true, true, TimeSpan.FromSeconds(30));
             if (msg.Content == "Y")
             {
-                v.Remove(img);
-                File.WriteAllText(_queue, JsonConvert.SerializeObject(v));
+                ImageService.RemoveImage(index - 1);
                 await ReplyAsync("Removed!");
             }
             if (msg.Content == "N")
@@ -302,17 +318,10 @@ namespace dws.Modules
                 $"- Channels: {Context.Client.Guilds.Sum(g => g.Channels.Count)}\n" +
                 $"- Users: {Context.Client.Guilds.Sum(g => g.Users.Count)}\n");
         }
+        
         private static string GetUptime() => (DateTime.Now - Process.GetCurrentProcess().StartTime).ToString(@"dd\.hh\:mm\:ss");
         private static string GetHeapSize() => Math.Round(GC.GetTotalMemory(true) / (1024.0 * 1024.0), 2).ToString();
-        private List<string> GetQueue()
-        {
-            List<string> q = new List<string>();
-            if (File.Exists(_queue))
-            {
-                q = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(_queue));
-            }
-            else { }
-            return q;
-        }
+
+
     }
 }

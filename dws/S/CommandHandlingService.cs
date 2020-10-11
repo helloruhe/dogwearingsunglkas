@@ -33,14 +33,6 @@ namespace dws
         {
             // Register modules that are public and inherit ModuleBase<T>.
             await _commands.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
-            foreach (var ok in _commands.Modules)
-            {
-                Console.WriteLine(ok.Name);
-                foreach (var poop in ok.Commands)
-                {
-                    Console.WriteLine(poop.Name);
-                }
-            }
         }
 
         public async Task MessageReceivedAsync(SocketMessage rawMessage)

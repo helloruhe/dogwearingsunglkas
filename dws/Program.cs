@@ -12,6 +12,7 @@ using Newtonsoft.Json;
 using System.IO;
 using System.Linq;
 using Discord.Addons.Interactive;
+using dws.S;
 
 namespace dws
 {
@@ -66,41 +67,32 @@ namespace dws
                 _twitterService = services.GetService<TwitterService>();
                 await _twitterService.AuthClient();
                 await services.GetRequiredService<CommandHandlingService>().InitializeAsync();
+               // await _twitterService.checkMentions();
 
                 while (isOn)
                 {
                     await CheckMentions();
-                    await Task.Delay(TimeSpan.FromSeconds(300));
+                    await Task.Delay(TimeSpan.FromMinutes(3));
                 }
 
                 await Task.Delay(Timeout.Infinite);
             }
-                              // Connect to the websocket
+            
+            // Connect to the websocket
         }
         private async Task CheckMentions()
         {
             multiplier = int.Parse(File.ReadAllText("multi.txt")); //incase of a forcepost, if it's been changed
             await _twitterService.checkMentions();
             multiplier += 1;
-            if (multiplier >= 48)
+            if (multiplier >= 70)
             {
-                await _twitterService.PostImage(GetNextInQueue());
+                await _twitterService.PostImage();
                 multiplier = 0;
             }
             File.WriteAllText("multi.txt", $"{multiplier}");
         }
-        private string GetNextInQueue()
-        {
-            List<string> q = new List<string>();
-            if (File.Exists("images.json"))
-            {
-                q = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText("images.json"));
-            }
-            var o = q.First();
-            q.Remove(q.First());
-            File.WriteAllText("images.json", JsonConvert.SerializeObject(q));
-            return o;
-        }
+
         public static Task LogAsync(LogMessage msg)
         {
             switch (msg.Severity)
@@ -141,6 +133,7 @@ namespace dws
                 .AddSingleton<HttpClient>()
                 .AddSingleton<InteractiveService>()
                 .AddSingleton<TwitterService>()
+                .AddSingleton<ImageService>()
                 .BuildServiceProvider();
         }
     }
