@@ -21,6 +21,8 @@ namespace dws
         private int multiplier;
         private CommandHandlingService _handler;
         private TwitterService _twitterService;
+        private DiscordSocketClient client;
+
         public static void Main(string[] args) =>
             new Program().StartAsync().GetAwaiter().GetResult();
 
@@ -52,7 +54,7 @@ namespace dws
             using (var services = ConfigureServices())
             {
 
-                var client = services.GetRequiredService<DiscordSocketClient>();
+                client = services.GetRequiredService<DiscordSocketClient>();
 
                 client.Log += LogAsync;
                 services.GetRequiredService<CommandService>().Log += LogAsync;
@@ -87,7 +89,18 @@ namespace dws
             multiplier += 1;
             if (multiplier >= 70)
             {
-                await _twitterService.PostImage();
+                try
+                {
+                    await _twitterService.PostImage();
+                }
+                catch
+                {
+                    if (_twitterService.GetReply(0) == null)
+                    {
+                        var oi = client.GetGuild(763851218145509397)
+                            .GetTextChannel(763936785272930374).SendMessageAsync("@everyone the bot is out of images ://");
+                    }
+                }
                 multiplier = 0;
             }
             File.WriteAllText("multi.txt", $"{multiplier}");

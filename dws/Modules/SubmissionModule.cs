@@ -17,6 +17,7 @@ namespace dws.Modules
     {
         public TwitterService TwitterService { get; set; }
         public ImageService ImageService { get; set; }
+        private static string _admins = "admins.json";
 
         public SubmissionModule()
         {
@@ -89,19 +90,52 @@ namespace dws.Modules
             }
         }
 
+        [Command("removeauth")]
+        [RequireBotMod]
+        public async Task RemoveAuth(IUser user)
+        {
+            RemoveUser(user);
+            await Context.Channel.SendMessageAsync($"{user.Mention} has been removed from list 🔥");
+        }
+
         [Command("addauth", RunMode = RunMode.Async)]
         [Alias("aa")]
         [RequireBotMod]
-        public async Task AddUser(IUser user)
+        public async Task AddUserAsync(IUser user)
         {
-                await Context.Channel.SendMessageAsync($"{user.Mention} has been added to list 🔥");
+            AddUser(user);
+            await Context.Channel.SendMessageAsync($"{user.Mention} has been added to list 🔥");
         }
 
         [Command("cm"), Alias("checkmentions")]
+        [RequireBotMod]
         public async Task CheckMentions()
         {
                 await TwitterService.checkMentions();
                 await Context.Channel.SendMessageAsync($" 🔥");
+        }
+
+        [Command("rr", RunMode = RunMode.Async), Alias("removereply")]
+        [RequireBotMod]
+        public async Task RemoveReply(int reply)
+        {
+            var r = TwitterService.GetReply(reply-1);
+            await ReplyAsync(r);
+            await ReplyAsync("^^ Remove this? (Y/N)");
+            var msg = await NextMessageAsync(true, true, TimeSpan.FromSeconds(30));
+            if (msg.Content == "Y")
+            {
+                TwitterService.RemoveReply(reply - 1);
+                await ReplyAsync("Removed!");
+            }
+            if (msg.Content == "N")
+            {
+                await ReplyAsync("ok");
+            }
+            else
+            {
+                await ReplyAsync("?");
+            }
         }
 
         [Command("submitphoto", RunMode = RunMode.Async)]
@@ -230,6 +264,8 @@ namespace dws.Modules
         public async Task GetRepliesAsync()
         {
             List<string> q = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText("replies.json"));
+            List<string> staticd = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText("replies.json"));
+
             string list = "";
             foreach (var b in q)
             {
@@ -254,7 +290,7 @@ namespace dws.Modules
                     list = "";
                     foreach (var e in b)
                     {
-                        list += e + "\n";
+                        list += (staticd.IndexOf(e)+1) + ". " + e + "\n";
                     }
                     f.Add(new EmbedBuilder()
                     {
@@ -267,6 +303,7 @@ namespace dws.Modules
                 f.Add(new EmbedBuilder()
                 {
                     Title = "Responses",
+                    Description = (staticd.IndexOf(b) + 1) + ". ",
                     ImageUrl = b
                 });
             }
@@ -318,7 +355,20 @@ namespace dws.Modules
                 $"- Channels: {Context.Client.Guilds.Sum(g => g.Channels.Count)}\n" +
                 $"- Users: {Context.Client.Guilds.Sum(g => g.Users.Count)}\n");
         }
-        
+
+        private void AddUser(IUser u)
+        {
+            List<ulong> admins = JsonConvert.DeserializeObject<List<ulong>>(File.ReadAllText(_admins));
+            admins.Add(u.Id);
+            File.WriteAllText(_admins, JsonConvert.SerializeObject(admins));
+        }
+
+        private void RemoveUser(IUser u)
+        {
+            List<ulong> admins = JsonConvert.DeserializeObject<List<ulong>>(File.ReadAllText(_admins));
+            admins.Remove(u.Id);
+            File.WriteAllText(_admins, JsonConvert.SerializeObject(admins));
+        }
         private static string GetUptime() => (DateTime.Now - Process.GetCurrentProcess().StartTime).ToString(@"dd\.hh\:mm\:ss");
         private static string GetHeapSize() => Math.Round(GC.GetTotalMemory(true) / (1024.0 * 1024.0), 2).ToString();
 

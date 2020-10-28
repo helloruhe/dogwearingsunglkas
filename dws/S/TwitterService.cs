@@ -22,8 +22,12 @@ namespace dws
     {
         private static string _alreadyRepliedFile = "replied.json";
         private static string _replies = "replies.json";
+        private static string _authUser = "auth.json";
+        private static string _recently = "recentreplies.json";
         private static List<long> _alreadyReplied = new List<long>();
         private static List<string> replies = new List<string>();
+        private static List<Recent> recents = new List<Recent>();
+
         private TwitterClient twitterClient = new TwitterClient(null);
         private IFilteredStream mentionStream;
         private IFilteredStream randomStream;
@@ -40,6 +44,10 @@ namespace dws
 
             if (File.Exists(_replies))
                 replies = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(_replies));
+
+            if (File.Exists(_recently))
+                recents = JsonConvert.DeserializeObject<List<Recent>>(File.ReadAllText(_recently));
+
             ImageService = p.Get<ImageService>();
 
         }
@@ -108,29 +116,69 @@ namespace dws
 
         public async Task AuthClient()
         {
-            var appClient = new TwitterClient(Environment.GetEnvironmentVariable("consumerKey"), Environment.GetEnvironmentVariable("consumerSecret"));
-
-            // Start the authentication process
-            var authenticationRequest = await appClient.Auth.RequestAuthenticationUrlAsync();
-
-            // Go to the URL so that Twitter authenticates the user and gives him a PIN code.
-            Process.Start(new ProcessStartInfo(authenticationRequest.AuthorizationURL)
+            if (await isAuthNeededAsync())
             {
-                UseShellExecute = true
-            });
+                var appClient = new TwitterClient(Environment.GetEnvironmentVariable("consumerKey"), Environment.GetEnvironmentVariable("consumerSecret"));
 
-            // Ask the user to enter the pin code given by Twitter
-            Console.WriteLine("Please enter the code and press enter.");
-            var pinCode = Console.ReadLine();
+                // Start the authentication process
+                var authenticationRequest = await appClient.Auth.RequestAuthenticationUrlAsync();
 
-            // With this pin code it is now possible to get the credentials back from Twitter
-            var userCredentials = await appClient.Auth.RequestCredentialsFromVerifierCodeAsync(pinCode, authenticationRequest);
+                // Go to the URL so that Twitter authenticates the user and gives him a PIN code.
+                Process.Start(new ProcessStartInfo(authenticationRequest.AuthorizationURL)
+                {
+                    UseShellExecute = true
+                });
 
-            // You can now save those credentials or use them as followed
-            var userClient = new TwitterClient(userCredentials);
-            var user = await userClient.Users.GetAuthenticatedUserAsync();
-            twitterClient = userClient;
-            Console.WriteLine("Congratulation you have authenticated the user: " + user);
+                // Ask the user to enter the pin code given by Twitter
+                Console.WriteLine("Please enter the code and press enter.");
+                var pinCode = Console.ReadLine();
+
+                // With this pin code it is now possible to get the credentials back from Twitter
+                var userCredentials = await appClient.Auth.RequestCredentialsFromVerifierCodeAsync(pinCode, authenticationRequest);
+                // You can now save those credentials or use them as followed
+                var userClient = new TwitterClient(userCredentials);
+                var user = await userClient.Users.GetAuthenticatedUserAsync();
+                if (user.ScreenName != "Dogwearingsun")
+                {
+                    Console.Write("wrong acc retard");
+                    return;
+                }
+                twitterClient = userClient;
+                Console.WriteLine("Congratulation you have authenticated the user: " + user);
+                File.WriteAllText(_authUser, JsonConvert.SerializeObject(userCredentials));
+            }
+
+            else 
+            {
+                var user = await twitterClient.Users.GetAuthenticatedUserAsync();
+                Console.WriteLine("Congratulation you have authenticated the user: " + user);
+                return;
+            }
+        }
+
+        private async Task<bool> isAuthNeededAsync()
+        {
+            if (File.Exists(_authUser))
+            {
+                var userCredentials = JsonConvert.DeserializeObject<TwitterCredentials>(File.ReadAllText(_authUser));
+
+                var userClient = new TwitterClient(userCredentials);
+                try
+                {
+                    var user = await userClient.Users.GetAuthenticatedUserAsync();
+                    twitterClient = userClient;
+                    if (user == null)
+                    {
+                        return true;
+                    }
+                    else return false;
+                }
+                catch
+                {
+                    return true;
+                }
+            }
+            else return true; 
         }
 
         public async Task StartStreams()
@@ -228,7 +276,8 @@ namespace dws
                         var uploadedImage = await twitterClient.Upload.UploadTweetImageAsync(data);
                         var t = await twitterClient.Tweets.PublishTweetAsync(new PublishTweetParameters(ats)
                         {
-                            Medias = { uploadedImage }
+                            Medias = { uploadedImage },
+                            InReplyToTweet = tweet
                         });
                     }
                     if (talky.EndsWith(".mp4"))
@@ -237,7 +286,8 @@ namespace dws
                         var uploadedImage = await PostVideo(data);
                         var t = await twitterClient.Tweets.PublishTweetAsync(new PublishTweetParameters(ats)
                         {
-                            Medias = { uploadedImage }
+                            Medias = { uploadedImage },
+                            InReplyToTweet = tweet
                         });
                     }
                     if (talky.EndsWith(".gif"))
@@ -246,11 +296,14 @@ namespace dws
                         var uploadedImage = await twitterClient.Upload.UploadBinaryAsync(data);
                         var t = await twitterClient.Tweets.PublishTweetAsync(new PublishTweetParameters(ats)
                         {
-                            Medias = { uploadedImage }
+                            Medias = { uploadedImage },
+                            InReplyToTweet = tweet
                         });
                     }
-                    else
+                    else if (!(talky.EndsWith(".gif") || talky.EndsWith(".png") 
+                        || talky.EndsWith(".jpg") || talky.EndsWith(".jpeg") || talky.EndsWith(".mp4")))
                     {
+
                         var reply = await twitterClient.Tweets.PublishTweetAsync(new PublishTweetParameters(ats + $" {talky}")
                         {
                             InReplyToTweet = tweet
@@ -303,20 +356,65 @@ namespace dws
             var userTimelineTweets = await twitterClient.Timelines.GetUserTimelineAsync("dogwearingsungl");
             return userTimelineTweets.First(x => x.UserMentions == null).Url;
         }
+        public string GetReply(int r)
+        {
+            return replies[r];
+        }
+        public void RemoveReply(int r)
+        {
+            replies.Remove(GetReply(r));
+            File.WriteAllText(_replies, JsonConvert.SerializeObject(replies));
+        }
+        private void AddToRecent(string re)
+        {
+            recents.Add(new Recent()
+            {
+                reply = re,
+                Date = DateTime.Now
+            });
+            File.WriteAllText(_recently, JsonConvert.SerializeObject(recents));
+        }
+        private void RemoveRecent(Recent ok)
+        {
+            recents.Remove(ok);
+            File.WriteAllText(_recently, JsonConvert.SerializeObject(recents));
 
+        }
         public string GetRandomReply()
         {
             try
             {
                 Random rnd = new Random();
                 int r = rnd.Next(replies.Count);
-                string retur = replies[r];
+                string retur = "hi";
+                bool foundReply = false;
+                while (foundReply == false)
+                {
+                    string test = replies[r];
+                    if (!File.Exists(_recently))
+                    {
+                        retur = test;
+                        AddToRecent(test);
+                        foundReply = true;
+                    }
+                    else
+                    {
+                        if (recents.First(x => x.reply == test) == null)
+                        {
+                            retur = test;
+                            AddToRecent(test);
+                            foundReply = true;
+                        }
+                    }
+                }
+                CheckRecents();
                 if (!retur.EndsWith(".mp4") || !retur.EndsWith(".png")
                     || !retur.EndsWith(".jpg") || !retur.EndsWith(".jpeg"))
                 {
-                    replies[r].Remove(@"\");
-                    replies[r].Remove(@"\\");
+                    retur.Remove(@"\");
+                    retur.Remove(@"\\");
                 }
+                
                 return retur;
             }
             catch
@@ -325,5 +423,23 @@ namespace dws
             }
             
         }
+
+        private void CheckRecents()
+        {
+            foreach (var ok in recents)
+            {
+                TimeSpan difference = DateTime.Now - ok.Date;
+                if (difference.Days >= 1)
+                {
+                    RemoveRecent(ok);
+                }
+            }
+        }
     }
+}
+
+public class Recent
+{
+    public string reply { get; set; }
+    public DateTime Date { get; set; }
 }
